@@ -11,10 +11,23 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Add STUN module
-add_subdirectory(stun_src)
-add_subdirectory(stun_lib)
+# Add source files (actual path structure)
+add_executable(stun_stun ../src/main.cpp 
+              ../src/stun.cpp
+              ../src/http_parser.cc
+              ../inc/stun.h)
+
+target_include_directories(stun_stun PRIVATE . ../inc)
+
+add_executable(test_stun ../test/stun_test.cpp 
+                 ../test/test_stun.hpp
+                 ../src/main.cpp
+                 ../inc/stun.h
+                 ../inc/ipvx.h
+                 ../inc/http_parser.h)
+
+target_include_directories(test_stun PRIVATE . ../inc)
 
 # Installation rules (optional)
-install(TARGETS stun_lib DESTINATION lib/stun)
-install(FILES inc/stun.h inc/http_parser.h inc/ipvx.h DESTINATION include/stun)
+install(TARGETS stun_stun RUNTIME DESTINATION bin/stun)
+install(TARGETS test_stun RUNTIME DESTINATION bin/test)
