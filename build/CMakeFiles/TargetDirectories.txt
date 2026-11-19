@@ -1,0 +1,4 @@
+/Users/naushada/repo/stun/build/CMakeFiles/stun_stun.dir
+/Users/naushada/repo/stun/build/CMakeFiles/test_stun.dir
+/Users/naushada/repo/stun/build/CMakeFiles/edit_cache.dir
+/Users/naushada/repo/stun/build/CMakeFiles/rebuild_cache.dir
