@@ -174,7 +174,7 @@ Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
     if (inet_ntop(family_af, raw.data(), buf, sizeof(buf)) == nullptr)
         throw std::runtime_error("inet_ntop failed");
 
-    return Endpoint{buf, port};
+    return Endpoint{buf, port, family};
 }
 
 }  // namespace stun

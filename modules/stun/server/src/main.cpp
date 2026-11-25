@@ -21,14 +21,14 @@ stun::Endpoint endpoint_from_sockaddr(const sockaddr* addr) {
         char host[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &in->sin_addr, host, sizeof(host)) == nullptr)
             return {};
-        return stun::Endpoint{host, ntohs(in->sin_port)};
+        return stun::Endpoint{host, ntohs(in->sin_port), stun::kFamilyIPv4};
     }
     if (addr->sa_family == AF_INET6) {
         const auto* in6 = reinterpret_cast<const sockaddr_in6*>(addr);
         char host[INET6_ADDRSTRLEN];
         if (inet_ntop(AF_INET6, &in6->sin6_addr, host, sizeof(host)) == nullptr)
             return {};
-        return stun::Endpoint{host, ntohs(in6->sin6_port)};
+        return stun::Endpoint{host, ntohs(in6->sin6_port), stun::kFamilyIPv6};
     }
     return {};
 }

@@ -23,6 +23,10 @@ constexpr uint32_t kMagicCookie = 0x2112A442;
 constexpr uint16_t kAttrMappedAddress    = 0x0001;
 constexpr uint16_t kAttrXorMappedAddress = 0x0020;
 
+// Address families (RFC 8489 Section 14.1).
+constexpr uint8_t kFamilyIPv4 = 0x01;
+constexpr uint8_t kFamilyIPv6 = 0x02;
+
 using TransactionId = std::array<uint8_t, 12>;
 
 // A single STUN attribute: a 16-bit type plus an opaque value.
@@ -52,7 +56,13 @@ struct Message {
 struct Endpoint {
     std::string address;  // dotted-quad IPv4 or textual IPv6
     uint16_t port = 0;
+    uint8_t family = kFamilyIPv4;  // kFamilyIPv4 or kFamilyIPv6 (set by decode)
 };
+
+// Human-readable family name ("IPv4"/"IPv6").
+inline const char* family_name(uint8_t family) {
+    return family == kFamilyIPv6 ? "IPv6" : "IPv4";
+}
 
 // Encode an endpoint as the value of a XOR-MAPPED-ADDRESS attribute.
 std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,

@@ -40,6 +40,7 @@ void test_xor_mapped_ipv4() {
     stun::Endpoint out = stun::decode_mapped_address(value, id, /*xor=*/true);
     CHECK(out.address == "192.0.2.1");
     CHECK(out.port == 32853);
+    CHECK(out.family == stun::kFamilyIPv4);
 }
 
 void test_xor_mapped_ipv6() {
@@ -51,6 +52,7 @@ void test_xor_mapped_ipv6() {
     stun::Endpoint out = stun::decode_mapped_address(value, id, /*xor=*/true);
     CHECK(out.address == "2001:db8::1");
     CHECK(out.port == 9);
+    CHECK(out.family == stun::kFamilyIPv6);
 }
 
 }  // namespace
