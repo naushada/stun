@@ -1,0 +1,28 @@
+# Version control
+.git
+.gitignore
+
+# Build output (CMake)
+build
+bin
+CMakeCache.txt
+CMakeFiles
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# Compiled artifacts
+*.o
+*.a
+
+# Leftover artifacts from earlier unrelated builds
+_deps
+lib
+libzerotouch_core.a
+zerotouch-tests
+
+# Duplicate containerfile (container/Dockerfile is the canonical one)
+Containerfile
+
+# This file
+.dockerignore
