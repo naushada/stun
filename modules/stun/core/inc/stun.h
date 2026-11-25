@@ -1,4 +1,5 @@
-// stun.h — minimal STUN (RFC 8489) client library.
+// stun.h — shared STUN (RFC 8489) message format: encode/decode and
+// XOR-MAPPED-ADDRESS codec. Used by both the client and the server.
 
 #pragma once
 
@@ -53,9 +54,6 @@ struct Endpoint {
     uint16_t port = 0;
 };
 
-// Build a Binding request with a fresh random transaction id.
-Message make_binding_request();
-
 // Encode an endpoint as the value of a XOR-MAPPED-ADDRESS attribute.
 std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,
                                                const TransactionId& id);
@@ -65,8 +63,5 @@ std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,
 Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
                                const TransactionId& id,
                                bool xor_encoded);
-
-// Extract the reflexive/mapped address from a successful Binding response.
-std::optional<Endpoint> mapped_address(const Message& response);
 
 }  // namespace stun

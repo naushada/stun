@@ -1,4 +1,4 @@
-#include "stun.h"
+#include "stun_client.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -41,7 +41,7 @@ Server parse_server(const std::string& arg, const std::string& default_port) {
 int main(int argc, char** argv) {
     Server server = parse_server((argc > 1) ? argv[1] : "stun.l.google.com:19302", "19302");
 
-    stun::Message request = stun::make_binding_request();
+    stun::Message request = stun::client::make_binding_request();
     std::vector<uint8_t> packet = request.encode();
 
     addrinfo hints{};
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
     }
 
     if (response.type == stun::kBindingResponse) {
-        auto endpoint = stun::mapped_address(response);
+        auto endpoint = stun::client::mapped_address(response);
         if (!endpoint) {
             std::cerr << "binding response has no mapped address\n";
             return 1;
