@@ -10,6 +10,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <openssl/ssl.h>
+
 #include <cerrno>
 #include <chrono>
 #include <cstdarg>
@@ -35,6 +37,9 @@ std::unordered_map<std::string, Level> g_levels;
 std::string g_http_host = "localhost";
 uint16_t g_http_port = 9200;
 std::string g_http_path = "/";
+bool g_http_tls = false;
+bool g_http_verify = true;
+SSL_CTX* g_ssl_ctx = nullptr;
 
 const char* level_name(Level level) {
     switch (level) {
@@ -129,10 +134,8 @@ void emit_syslog(Level level, std::string_view module, const std::string& messag
     syslog(syslog_priority(level), "[%s] %s", module_str.c_str(), message.c_str());
 }
 
-// Send a plain HTTP/1.1 POST (no TLS) and discard the response. Best-effort:
-// on any error the line is dropped. Returns true if the request was fully sent.
-bool http_post(const std::string& host, uint16_t port, const std::string& path,
-               const std::string& body) {
+// TCP connect with a short timeout. Returns a socket fd, or -1 on failure.
+int tcp_connect(const std::string& host, uint16_t port) {
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -140,7 +143,7 @@ bool http_post(const std::string& host, uint16_t port, const std::string& path,
     std::string port_str = std::to_string(port);
     addrinfo* res = nullptr;
     if (getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res) != 0)
-        return false;
+        return -1;
 
     int fd = -1;
     for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
@@ -178,11 +181,12 @@ bool http_post(const std::string& host, uint16_t port, const std::string& path,
         break;
     }
     freeaddrinfo(res);
-    if (fd < 0) return false;
+    return fd;
+}
 
-    timeval snd{kHttpTimeoutMs / 1000, (kHttpTimeoutMs % 1000) * 1000};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &snd, sizeof(snd));
-
+std::string build_request(const std::string& host, uint16_t port,
+                          const std::string& path, const std::string& body) {
+    std::string port_str = std::to_string(port);
     std::string request;
     request.reserve(body.size() + 256);
     request += "POST " + path + " HTTP/1.1\r\n";
@@ -191,20 +195,72 @@ bool http_post(const std::string& host, uint16_t port, const std::string& path,
     request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     request += "Connection: close\r\n\r\n";
     request += body;
+    return request;
+}
 
-    bool ok = true;
+bool send_all(int fd, const std::string& data) {
     size_t sent = 0;
-    while (sent < request.size()) {
-        ssize_t n = send(fd, request.data() + sent, request.size() - sent, 0);
-        if (n <= 0) { ok = false; break; }
+    while (sent < data.size()) {
+        ssize_t n = send(fd, data.data() + sent, data.size() - sent, 0);
+        if (n <= 0) return false;
         sent += static_cast<size_t>(n);
     }
-    close(fd);
-    return ok;
+    return true;
+}
+
+// Lazily build (and cache) the client SSL context. Assumes g_mutex is held.
+SSL_CTX* get_ssl_ctx() {
+    if (g_ssl_ctx) return g_ssl_ctx;
+    g_ssl_ctx = SSL_CTX_new(TLS_client_method());
+    if (!g_ssl_ctx) return nullptr;
+    if (g_http_verify) {
+        SSL_CTX_set_default_verify_paths(g_ssl_ctx);
+        SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, nullptr);
+    } else {
+        SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, nullptr);
+    }
+    return g_ssl_ctx;
+}
+
+// Send `request` over an already-connected socket wrapped in TLS. Best-effort.
+void https_write(int fd, const std::string& host, const std::string& request) {
+    SSL_CTX* ctx = get_ssl_ctx();
+    if (!ctx) return;
+    SSL* ssl = SSL_new(ctx);
+    if (!ssl) return;
+    SSL_set_fd(ssl, fd);
+    SSL_set_tlsext_host_name(ssl, host.c_str());  // SNI
+    if (SSL_connect(ssl) != 1) {
+        SSL_free(ssl);
+        return;
+    }
+    size_t sent = 0;
+    while (sent < request.size()) {
+        int n = SSL_write(ssl, request.data() + sent,
+                          static_cast<int>(request.size() - sent));
+        if (n <= 0) break;
+        sent += static_cast<size_t>(n);
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
 }
 
 void emit_http(Level level, std::string_view module, const std::string& message) {
-    http_post(g_http_host, g_http_port, g_http_path, to_json(level, module, message));
+    int fd = tcp_connect(g_http_host, g_http_port);
+    if (fd < 0) return;
+
+    timeval tv{kHttpTimeoutMs / 1000, (kHttpTimeoutMs % 1000) * 1000};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    std::string request = build_request(g_http_host, g_http_port, g_http_path,
+                                        to_json(level, module, message));
+    if (g_http_tls) {
+        https_write(fd, g_http_host, request);
+    } else {
+        send_all(fd, request);
+    }
+    close(fd);
 }
 
 // Assumes g_mutex is held.
@@ -244,11 +300,18 @@ void set_level(std::string_view module, Level level) {
     g_levels[std::string(module)] = level;
 }
 
-void set_http_endpoint(std::string host, uint16_t port, std::string path) {
+void set_http_endpoint(std::string host, uint16_t port, std::string path,
+                       bool use_tls, bool verify_peer) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_http_host = std::move(host);
     g_http_port = port;
     g_http_path = std::move(path);
+    g_http_tls = use_tls;
+    g_http_verify = verify_peer;
+    if (g_ssl_ctx) {  // TLS settings may have changed.
+        SSL_CTX_free(g_ssl_ctx);
+        g_ssl_ctx = nullptr;
+    }
 }
 
 Level get_level(std::string_view module) {

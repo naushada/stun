@@ -50,9 +50,12 @@ void set_default_level(Level level);
 // Minimum level for a named module (e.g. "client", "server", "core").
 void set_level(std::string_view module, Level level);
 
-// Configure the HTTP backend: POST each log line as JSON to `host:port/path`
-// over plain HTTP (no TLS). E.g. set_http_endpoint("localhost", 9200, "/stun/_doc").
-void set_http_endpoint(std::string host, uint16_t port, std::string path);
+// Configure the HTTP backend: POST each log line as JSON to `host:port/path`.
+// Set `use_tls` to POST over HTTPS; `verify_peer` (default true) validates the
+// server certificate against the system CA store, pass false for self-signed
+// certificates. E.g. set_http_endpoint("localhost", 9200, "/stun/_doc").
+void set_http_endpoint(std::string host, uint16_t port, std::string path,
+                       bool use_tls = false, bool verify_peer = true);
 
 // Effective level for a module (its own level, or the default).
 Level get_level(std::string_view module);

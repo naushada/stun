@@ -60,7 +60,7 @@ stun
 - **Three backends**:
   - `Stderr` — single-line JSON (default), ideal for containers.
   - `Syslog` — traditional `syslog(3)` with a configurable facility.
-  - `Http` — POST each line as JSON to a configurable endpoint (plain HTTP), for direct Elasticsearch/cloud ingestion.
+  - `Http` — POST each line as JSON to a configurable endpoint (HTTP or HTTPS via OpenSSL), for direct Elasticsearch/cloud ingestion.
 - **Cloud / Elasticsearch**: the JSON backend emits one line per event, e.g.
   `{"timestamp":"...","level":"notice","module":"client","message":"..."}`.
   Tail it with Fluentd/Filebeat/Vector (or a container log driver) and ship it
@@ -74,6 +74,10 @@ STUN_LOG_NOTICE("client", "querying %s", host);
 
 // Direct HTTP ingestion (e.g. Elasticsearch single-doc endpoint):
 logging::set_http_endpoint("localhost", 9200, "/stun-logs/_doc");
+logging::init(logging::Backend::Http);
+
+// HTTPS with certificate verification (e.g. Elastic Cloud):
+logging::set_http_endpoint("logs.example.com", 443, "/_bulk", /*use_tls=*/true);
 logging::init(logging::Backend::Http);
 ```
 
