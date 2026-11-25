@@ -57,9 +57,10 @@ stun
 - **Levels** mirror syslog severities: `Emergency`, `Alert`, `Critical`, `Error`,
   `Warning`, `Notice`, `Info`, `Debug`. The default threshold is `Notice`.
 - **Per-module thresholds**: `logging::set_level("client", logging::Level::Debug)`.
-- **Two backends**:
+- **Three backends**:
   - `Stderr` — single-line JSON (default), ideal for containers.
   - `Syslog` — traditional `syslog(3)` with a configurable facility.
+  - `Http` — POST each line as JSON to a configurable endpoint (plain HTTP), for direct Elasticsearch/cloud ingestion.
 - **Cloud / Elasticsearch**: the JSON backend emits one line per event, e.g.
   `{"timestamp":"...","level":"notice","module":"client","message":"..."}`.
   Tail it with Fluentd/Filebeat/Vector (or a container log driver) and ship it
@@ -70,6 +71,10 @@ stun
 logging::init();                          // defaults: Stderr backend + Notice level
 logging::set_level("server", logging::Level::Debug);
 STUN_LOG_NOTICE("client", "querying %s", host);
+
+// Direct HTTP ingestion (e.g. Elasticsearch single-doc endpoint):
+logging::set_http_endpoint("localhost", 9200, "/stun-logs/_doc");
+logging::init(logging::Backend::Http);
 ```
 
 ## Building (Podman only)

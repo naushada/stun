@@ -13,6 +13,7 @@
 #include <syslog.h>
 
 #include <cstdarg>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -34,7 +35,8 @@ enum class Level : int {
 enum Backend : unsigned {
     Syslog = 1u << 0,
     Stderr = 1u << 1,
-    All    = Syslog | Stderr,
+    Http   = 1u << 2,
+    All    = Syslog | Stderr | Http,
 };
 
 // Configure backends, the default level, and the syslog facility.
@@ -47,6 +49,10 @@ void set_default_level(Level level);
 
 // Minimum level for a named module (e.g. "client", "server", "core").
 void set_level(std::string_view module, Level level);
+
+// Configure the HTTP backend: POST each log line as JSON to `host:port/path`
+// over plain HTTP (no TLS). E.g. set_http_endpoint("localhost", 9200, "/stun/_doc").
+void set_http_endpoint(std::string host, uint16_t port, std::string path);
 
 // Effective level for a module (its own level, or the default).
 Level get_level(std::string_view module);

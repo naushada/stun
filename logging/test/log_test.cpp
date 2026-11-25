@@ -1,5 +1,12 @@
 #include "log.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+
 #include <cstdio>
 #include <string>
 
@@ -51,12 +58,58 @@ void test_emit_smoke() {
     logging::write(logging::Level::Error, "test", "oops");
 }
 
+void test_http_sink() {
+    // Spin up a local TCP listener to capture the POST.
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(listener >= 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;  // ephemeral port
+    CHECK(bind(listener, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
+    CHECK(listen(listener, 1) == 0);
+
+    socklen_t len = sizeof(addr);
+    CHECK(getsockname(listener, reinterpret_cast<sockaddr*>(&addr), &len) == 0);
+
+    logging::set_http_endpoint("127.0.0.1", ntohs(addr.sin_port), "/logs/_doc");
+    logging::init(logging::Backend::Http, logging::Level::Notice);
+
+    logging::log(logging::Level::Error, "http", "boom %d", 7);
+
+    // The POST is synchronous, so a connection is now pending.
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(listener, &rfds);
+    timeval tv{5, 0};
+    CHECK(select(listener + 1, &rfds, nullptr, nullptr, &tv) > 0);
+
+    int conn = accept(listener, nullptr, nullptr);
+    CHECK(conn >= 0);
+
+    std::string request;
+    char buf[1024];
+    ssize_t n;
+    while ((n = read(conn, buf, sizeof(buf))) > 0)
+        request.append(buf, static_cast<size_t>(n));
+
+    CHECK(request.find("POST /logs/_doc HTTP/1.1") != std::string::npos);
+    CHECK(request.find("Content-Type: application/json") != std::string::npos);
+    CHECK(request.find("\"level\":\"error\"") != std::string::npos);
+    CHECK(request.find("\"message\":\"boom 7\"") != std::string::npos);
+
+    close(conn);
+    close(listener);
+}
+
 }  // namespace
 
 int main() {
     test_levels();
     test_format();
     test_emit_smoke();
+    test_http_sink();
 
     if (failures == 0) {
         std::printf("All log tests passed.\n");

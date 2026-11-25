@@ -2,6 +2,15 @@
 
 #include <syslog.h>
 
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include <cerrno>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -9,9 +18,12 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace logging {
 namespace {
+
+constexpr int kHttpTimeoutMs = 500;
 
 std::mutex g_mutex;
 Backend g_backend = Backend::Stderr;
@@ -19,6 +31,10 @@ Level g_default_level = Level::Notice;
 int g_facility = LOG_USER;
 bool g_syslog_open = false;
 std::unordered_map<std::string, Level> g_levels;
+
+std::string g_http_host = "localhost";
+uint16_t g_http_port = 9200;
+std::string g_http_path = "/";
 
 const char* level_name(Level level) {
     switch (level) {
@@ -83,18 +99,23 @@ std::string json_escape(const std::string& s) {
     return out;
 }
 
+std::string to_json(Level level, std::string_view module, const std::string& message) {
+    std::string out;
+    out.reserve(message.size() + 128);
+    out += "{\"timestamp\":\"";
+    out += now_utc();
+    out += "\",\"level\":\"";
+    out += level_name(level);
+    out += "\",\"module\":\"";
+    out += json_escape(std::string(module));
+    out += "\",\"message\":\"";
+    out += json_escape(message);
+    out += "\"}";
+    return out;
+}
+
 void emit_stderr(Level level, std::string_view module, const std::string& message) {
-    std::string line;
-    line.reserve(message.size() + 128);
-    line += "{\"timestamp\":\"";
-    line += now_utc();
-    line += "\",\"level\":\"";
-    line += level_name(level);
-    line += "\",\"module\":\"";
-    line += json_escape(std::string(module));
-    line += "\",\"message\":\"";
-    line += json_escape(message);
-    line += "\"}\n";
+    std::string line = to_json(level, module, message) + "\n";
     std::fwrite(line.data(), 1, line.size(), stderr);
     std::fflush(stderr);
 }
@@ -106,6 +127,84 @@ void emit_syslog(Level level, std::string_view module, const std::string& messag
     }
     std::string module_str(module);
     syslog(syslog_priority(level), "[%s] %s", module_str.c_str(), message.c_str());
+}
+
+// Send a plain HTTP/1.1 POST (no TLS) and discard the response. Best-effort:
+// on any error the line is dropped. Returns true if the request was fully sent.
+bool http_post(const std::string& host, uint16_t port, const std::string& path,
+               const std::string& body) {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    std::string port_str = std::to_string(port);
+    addrinfo* res = nullptr;
+    if (getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res) != 0)
+        return false;
+
+    int fd = -1;
+    for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
+        int s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s < 0) continue;
+
+        int flags = fcntl(s, F_GETFL, 0);
+        fcntl(s, F_SETFL, flags | O_NONBLOCK);
+
+        int rc = connect(s, ai->ai_addr, ai->ai_addrlen);
+        if (rc != 0 && errno != EINPROGRESS) {
+            close(s);
+            continue;
+        }
+        if (rc != 0) {  // EINPROGRESS: wait for the connect to finish.
+            fd_set wfds;
+            FD_ZERO(&wfds);
+            FD_SET(s, &wfds);
+            timeval tv{kHttpTimeoutMs / 1000, (kHttpTimeoutMs % 1000) * 1000};
+            if (select(s + 1, nullptr, &wfds, nullptr, &tv) <= 0) {
+                close(s);
+                continue;
+            }
+            int so_error = 0;
+            socklen_t slen = sizeof(so_error);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, &so_error, &slen);
+            if (so_error != 0) {
+                close(s);
+                continue;
+            }
+        }
+
+        fcntl(s, F_SETFL, flags);  // restore blocking mode
+        fd = s;
+        break;
+    }
+    freeaddrinfo(res);
+    if (fd < 0) return false;
+
+    timeval snd{kHttpTimeoutMs / 1000, (kHttpTimeoutMs % 1000) * 1000};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &snd, sizeof(snd));
+
+    std::string request;
+    request.reserve(body.size() + 256);
+    request += "POST " + path + " HTTP/1.1\r\n";
+    request += "Host: " + host + ":" + port_str + "\r\n";
+    request += "Content-Type: application/json\r\n";
+    request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    request += "Connection: close\r\n\r\n";
+    request += body;
+
+    bool ok = true;
+    size_t sent = 0;
+    while (sent < request.size()) {
+        ssize_t n = send(fd, request.data() + sent, request.size() - sent, 0);
+        if (n <= 0) { ok = false; break; }
+        sent += static_cast<size_t>(n);
+    }
+    close(fd);
+    return ok;
+}
+
+void emit_http(Level level, std::string_view module, const std::string& message) {
+    http_post(g_http_host, g_http_port, g_http_path, to_json(level, module, message));
 }
 
 // Assumes g_mutex is held.
@@ -145,6 +244,13 @@ void set_level(std::string_view module, Level level) {
     g_levels[std::string(module)] = level;
 }
 
+void set_http_endpoint(std::string host, uint16_t port, std::string path) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_http_host = std::move(host);
+    g_http_port = port;
+    g_http_path = std::move(path);
+}
+
 Level get_level(std::string_view module) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_levels.find(std::string(module));
@@ -161,6 +267,7 @@ void write(Level level, std::string_view module, const std::string& message) {
     if (!enabled_locked(level, module)) return;
     if (g_backend & Backend::Syslog) emit_syslog(level, module, message);
     if (g_backend & Backend::Stderr) emit_stderr(level, module, message);
+    if (g_backend & Backend::Http)   emit_http(level, module, message);
 }
 
 void log(Level level, std::string_view module, const char* fmt, ...) {
