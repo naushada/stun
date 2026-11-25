@@ -117,6 +117,8 @@ int main(int argc, char** argv) {
         }
         // Machine-readable result on stdout; diagnostics go through the logger.
         std::cout << endpoint->address << ":" << endpoint->port << "\n";
+        STUN_LOG_NOTICE("client", "mapped address: %s:%u",
+                        endpoint->address.c_str(), static_cast<unsigned>(endpoint->port));
         return 0;
     }
 
