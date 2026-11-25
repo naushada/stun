@@ -1,55 +1,21 @@
-/*
+MIT License
 
-   High-Performance C++ HTTP Request Response Parser Implementation
-   
-   Based on NGINX's src/http/ngx_http_parse.c by Igor Sysoev
-   Adapted for STUN (Session Traversal Utilities for NAT) implementation
-   
-   Copyright 2011, 2012 Robert Greiner
-   All Rights Reserved.
+Copyright (c) 2024 The STUN project contributors
 
-/*
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to
-   deal in the Software without restriction, including without limitation the
-   rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-   sell copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-/*
-
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-
-/*
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-   IN THE SOFTWARE.
-
-/*
-
-   ---
-
-   This implementation was originally created by Robert Greiner as a high-
-   performance O(n) time complexity HTTP request response parser, based on
-   NGINX's src/http/ngx_http_parse.c by Igor Sysoev.
-
-   It has been adapted for use with the STUN (Session Traversal Utilities for
-   NAT) protocol specification defined in RFC 8489, providing full support for:
-
-   - Basic Binding Requests
-   - MAPPED-RESPONSE attributes (RFC 8489 Section 3.2)
-   - Candidate generation and ordering (RFC 8489 Section 6)
-   - Transport integrity checks using MD5 hashing
-
-   The original NGINX parser code is licensed under the MIT license, with
-   additional contributions adapted for STUN requirements from Robert Greiner's
-   implementation.
-
-*/
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

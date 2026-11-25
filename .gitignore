@@ -1,0 +1,15 @@
+# CMake build output
+/build/
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Makefile
+*.o
+*.a
+
+# Leftover in-tree build artifacts from an earlier unrelated build
+/_deps/
+/lib/
+/libzerotouch_core.a
+/zerotouch-tests

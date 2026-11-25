@@ -1,180 +1,72 @@
-/**
- * @file stun.h
- * @brief Session Traversal Utilities for NAT (STUN) Implementation - Header File
- * @version 3.0 based on RFC 8489
- */
+// stun.h — minimal STUN (RFC 8489) client library.
 
-#ifndef STUN_H__
-#define STUN_H__
+#pragma once
 
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
-#include <map>
-#include <cstdint>
-#include <algorithm>
-#include <random>
 
-namespace Stun {
+namespace stun {
 
-/**
- * @struct StunMessage
- * @brief Represents a single STUN message (Request or Response)
- */
-struct StunMessage {
-    std::string indicator;
-    std::map<std::string, std::string> attributes;
-    uint8_t version = 1;
-    uint8_t transaction_id[12];
-    bool integrity_valid = false;
-    std::vector<uint8_t> message_body;
+// STUN message types (RFC 8489 Section 6).
+constexpr uint16_t kBindingRequest  = 0x0001;
+constexpr uint16_t kBindingResponse = 0x0101;
+constexpr uint16_t kBindingError    = 0x0111;
 
-    StunMessage();
-    ~StunMessage() override {};
+// The magic cookie (RFC 8489 Section 6), also used to XOR-encode addresses.
+constexpr uint32_t kMagicCookie = 0x2112A442;
 
-    static std::vector<uint8_t> generate_transaction_id();
-    void add_attribute(const std::string& name, const std::string& value);
-    std::optional<std::string> get_attribute(const std::string& name) const;
+// Attribute types (RFC 8489 Sections 14 and 18).
+constexpr uint16_t kAttrMappedAddress    = 0x0001;
+constexpr uint16_t kAttrXorMappedAddress = 0x0020;
+
+using TransactionId = std::array<uint8_t, 12>;
+
+// A single STUN attribute: a 16-bit type plus an opaque value.
+struct Attribute {
+    uint16_t type = 0;
+    std::vector<uint8_t> value;
 };
 
-/**
- * @class TraversalCandidate
- * @brief Represents a candidate binding address from STUN server
- */
-class TraversalCandidate {
-public:
-    enum class Type : uint8_t {
-        RELAYED = 0x01,      // Relay candidate (requires TURN)
-        FULL = 0x02,         // Full relay address
-        PRACKABLE = 0x03,    // Prackable candidate
-        RAS = 0x04           // Reliable Assured Sending candidate
-    };
+// A STUN message: a 20-byte header followed by zero or more attributes.
+struct Message {
+    uint16_t type = 0;
+    uint32_t magic_cookie = kMagicCookie;
+    TransactionId transaction_id{};  // 96-bit transaction id
+    std::vector<Attribute> attributes;
 
-    TraversalCandidate() : type(Type::RELAYED) {}
-    ~TraversalCandidate() override {};
+    // Serialize to wire format (big-endian, 4-byte attribute padding).
+    std::vector<uint8_t> encode() const;
 
-    Type type = Type::RELAYED;
-    std::string remote_address;
+    // Parse from wire format. Throws std::runtime_error on malformed input.
+    static Message decode(const std::vector<uint8_t>& bytes);
+
+    void add_attribute(uint16_t type, std::vector<uint8_t> value);
+    const Attribute* find(uint16_t type) const;
+};
+
+// A host address plus port.
+struct Endpoint {
+    std::string address;  // dotted-quad IPv4 or textual IPv6
     uint16_t port = 0;
-    std::pair<std::string, uint16_t> local_address;
-    std::optional<NetworkType> network_type;
-    uint16_t binding_port = 0;
-    int8_t relative_preference = -128;
-
-    TraversalCandidate(const std::string& addr, uint16_t port, 
-                       const std::pair<std::string, uint16_t>& local_addr,
-                       Type type_ = Type::RELAYED);
 };
 
-enum class NetworkType {
-    NAT = 0x01,
-    PUBLIC = 0x02,
-    DIRECT = 0x03
-};
+// Build a Binding request with a fresh random transaction id.
+Message make_binding_request();
 
-/**
- * @namespace Utility
- * @brief STUN message construction and parsing utilities
- */
-namespace Utility {
-    std::vector<uint8_t> compute_md5(const std::vector<uint8_t>& data);
-    std::string format_attribute(const std::string& name, const std::string& value);
-    uint8_t generate_indicator();
-}
+// Encode an endpoint as the value of a XOR-MAPPED-ADDRESS attribute.
+std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,
+                                               const TransactionId& id);
 
-/**
- * @class Transport
- * @brief Handles STUN message transport and integrity checking
- */
-class Transport {
-public:
-    enum class Direction { SEND = 0, RECEIVE = 1 };
-    Transport(TraversalCandidate::Type candidate_type = TraversalCandidate::Type::RELAYED);
-    ~Transport() override {};
-    uint8_t send_message(const StunMessage& msg, const std::string& bind_addr, 
-                       const TraversalCandidate::Type preferred_type);
-    bool parse_message(const std::string& raw_data);
-};
+// Decode a MAPPED-ADDRESS (xor_encoded=false) or XOR-MAPPED-ADDRESS
+// (xor_encoded=true) attribute value.
+Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
+                               const TransactionId& id,
+                               bool xor_encoded);
 
-/**
- * @namespace Binding
- * @brief Helper functions for creating binding requests
- */
-namespace Binding {
-    std::vector<uint8_t> create_basic_binding_request();
-    std::vector<uint8_t> create_mapped_response_binding_request(const TraversalCandidate& candidate);
-}
+// Extract the reflexive/mapped address from a successful Binding response.
+std::optional<Endpoint> mapped_address(const Message& response);
 
-/**
- * @namespace Message
- * @brief STUN message generation and handling functions
- */
-namespace Message {
-    StunMessage create_basic_binding();
-    StunMessage create_mapped_response_binding(const TraversalCandidate& candidate);
-}
-
-/**
- * @namespace CandidateGeneration
- * @brief STUN candidate generation utilities
- */
-namespace CandidateGeneration {
-    std::string generate_full_relay_address(const StunMessage& msg, 
-                                           const TraversalCandidate& local_candidate);
-}
-
-/**
- * @class Session
- * @brief Manages STUN sessions and candidate ordering
- */
-class Session {
-public:
-    using OrderedList = std::vector<TraversalCandidate>;
-    ~Session() override {};
-    void set_stun_server(const std::string& url);
-    OrderedList get_candidates();
-    bool process_candidate(const TraversalCandidate& candidate);
-};
-
-/**
- * @namespace Reliability
- * @brief Reliability protocols for STUN (RFC 8489 Section 12)
- */
-namespace Reliability {
-    std::vector<uint8_t> create_prack_request(const StunMessage& request, 
-                                            const TraversalCandidate::Type candidate_type);
-}
-
-/**
- * @namespace Statistics
- * @brief Track and collect statistics for STUN operations
- */
-namespace Statistics {
-    void increment_stat(const std::string& stat_name, size_t value);
-}
-
-/**
- * @namespace MessageConstruction
- * @brief Helper functions for building STUN messages (RFC 8489)
- */
-namespace MessageConstruction {
-    std::vector<uint8_t> compute_md5(const std::vector<uint8_t>& data);
-}
-
-/**
- * @namespace BindingRequest
- * @brief Build binding request messages (RFC 8489 Section 3)
- */
-namespace BindingRequest {
-    std::vector<uint8_t> create_basic_binding_request();
-}
-
-/**
- * @namespace MappingType
- * @brief STUN mapping type utilities (RFC 8489 Section 3.2)
- */
-namespace MappingType {
-    std::string format_mapped_response(const TraversalCandidate& candidate);
-}
-
-#endif // STUN_H__
+}  // namespace stun

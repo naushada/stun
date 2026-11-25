@@ -1,230 +1,199 @@
-/**
- * @file stun.cpp
- * @brief STUN Implementation for RFC 8489 - Session Traversal Utilities for NAT
- */
+#include "stun.h"
 
-#include "inc/stun.h"
-#include <string>
-#include <vector>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <random>
-#include <cstring>
+#include <stdexcept>
+#include <utility>
 
-namespace Stun {
+namespace stun {
+namespace {
 
-// Inline function implementations for basic binding generation
-std::vector<uint8_t> generate_transaction_id() {
-    // Generate random transaction ID (12 bytes)
-    std::vector<uint8_t> id(12, 0);
-    
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-    
-    for (size_t i = 0; i < 12; ++i) {
-        id[i] = static_cast<uint8_t>(dis(gen));
+constexpr size_t kHeaderSize = 20;
+
+void put_u16(std::vector<uint8_t>& out, uint16_t v) {
+    out.push_back(static_cast<uint8_t>(v >> 8));
+    out.push_back(static_cast<uint8_t>(v & 0xff));
+}
+
+void put_u32(std::vector<uint8_t>& out, uint32_t v) {
+    out.push_back(static_cast<uint8_t>(v >> 24));
+    out.push_back(static_cast<uint8_t>((v >> 16) & 0xff));
+    out.push_back(static_cast<uint8_t>((v >> 8) & 0xff));
+    out.push_back(static_cast<uint8_t>(v & 0xff));
+}
+
+uint16_t get_u16(const uint8_t* p) {
+    return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
+}
+
+uint32_t get_u32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+// The 16-byte XOR mask used by XOR-MAPPED-ADDRESS: the magic cookie followed
+// by the 96-bit transaction id.
+std::array<uint8_t, 16> xor_mask(const TransactionId& id) {
+    std::array<uint8_t, 16> mask{};
+    mask[0] = static_cast<uint8_t>(kMagicCookie >> 24);
+    mask[1] = static_cast<uint8_t>(kMagicCookie >> 16);
+    mask[2] = static_cast<uint8_t>(kMagicCookie >> 8);
+    mask[3] = static_cast<uint8_t>(kMagicCookie);
+    for (size_t i = 0; i < id.size(); ++i) mask[4 + i] = id[i];
+    return mask;
+}
+
+}  // namespace
+
+std::vector<uint8_t> Message::encode() const {
+    uint16_t length = 0;
+    for (const auto& attr : attributes) {
+        uint16_t padded = static_cast<uint16_t>(4 + attr.value.size());
+        padded = static_cast<uint16_t>((padded + 3) & ~uint16_t(3));
+        length = static_cast<uint16_t>(length + padded);
     }
-    
-    return id;
+
+    std::vector<uint8_t> out;
+    out.reserve(kHeaderSize + length);
+    put_u16(out, type);
+    put_u16(out, length);
+    put_u32(out, magic_cookie);
+    out.insert(out.end(), transaction_id.begin(), transaction_id.end());
+
+    for (const auto& attr : attributes) {
+        put_u16(out, attr.type);
+        put_u16(out, static_cast<uint16_t>(attr.value.size()));
+        out.insert(out.end(), attr.value.begin(), attr.value.end());
+        while (out.size() % 4 != 0) out.push_back(0);  // pad to 4-byte boundary
+    }
+    return out;
 }
 
-// Inline function for add_attribute method
-void add_attribute(const std::string& name, const std::string& value) {
-    (void)value; // Suppress unused parameter warning
-}
+Message Message::decode(const std::vector<uint8_t>& bytes) {
+    if (bytes.size() < kHeaderSize)
+        throw std::runtime_error("STUN message shorter than 20-byte header");
+    if ((bytes[0] & 0xc0) != 0)
+        throw std::runtime_error("STUN message has non-zero leading bits");
 
-// Inline function for get_attribute method  
-std::optional<std::string> get_attribute(const std::string& name) {
-    return std::nullopt;
-}
+    Message msg;
+    msg.type = get_u16(bytes.data());
+    uint16_t length = get_u16(bytes.data() + 2);
+    msg.magic_cookie = get_u32(bytes.data() + 4);
+    std::copy_n(bytes.data() + 8, msg.transaction_id.size(), msg.transaction_id.begin());
 
-/**
- * @brief Create a Basic Binding Request using the Transport class
- */
-StunMessage create_basic_binding() {
-    StunMessage msg;
-    msg.transaction_id = generate_transaction_id();
-    msg.version = 1;
-    
-    // Add METHOD attribute: "BING" method (basic binding)
-    std::string method_value = "BING";
-    add_attribute("METHOD", method_value);
-    
-    // Set indicator to 0x00 (Basic Binding Request type per RFC 8489 Section 3.1)
-    msg.indicator = "00";
-    
+    size_t pos = kHeaderSize;
+    size_t end = pos + length;
+    if (bytes.size() < end)
+        throw std::runtime_error("STUN message truncated");
+
+    while (pos + 4 <= end) {
+        Attribute attr;
+        attr.type = get_u16(bytes.data() + pos);
+        uint16_t len = get_u16(bytes.data() + pos + 2);
+        pos += 4;
+        if (pos + len > end)
+            throw std::runtime_error("STUN attribute truncated");
+        attr.value.assign(bytes.data() + pos, bytes.data() + pos + len);
+        msg.attributes.push_back(std::move(attr));
+        pos += len;
+        pos = (pos + 3) & ~size_t(3);  // skip padding
+    }
     return msg;
 }
 
-/**
- * @brief Create MAPPED-RESPONSE attribute for candidate binding address
- */
-std::string format_mapped_response(const TraversalCandidate& candidate) {
-    std::string type_str;
-    
-    switch (candidate.type) {
-        case TraversalCandidate::Type::RELAYED:
-            type_str = "RELYED";
-            break;
-        case TraversalCandidate::Type::FULL:
-            type_str = "FULL-RELAY";
-            break;
-        case TraversalCandidate::Type::PRACKABLE:
-            type_str = "PRACKABLE";
-            break;
-        case TraversalCandidate::Type::RAS:
-            type_str = "RAS";
-            break;
-    }
-    
-    return type_str + " " + candidate.remote_address;
+void Message::add_attribute(uint16_t type, std::vector<uint8_t> value) {
+    attributes.push_back(Attribute{type, std::move(value)});
 }
 
-/**
- * @namespace Reliability
- * @brief Reliability protocols for STUN (RFC 8489 Section 12)
- */
-namespace Reliability {
-
-std::vector<uint8_t> create_prack_request(const StunMessage& request,
-                                          const TraversalCandidate::Type candidate_type) {
-    std::vector<uint8_t> prack;
-    
-    // Add indicator byte (0x01 for Prack type per RFC 8489 Section 3.1)
-    prack.push_back(0x01);
-    
-    // Add RELATION attribute with candidate type
-    switch (candidate_type) {
-        case TraversalCandidate::Type::RELAYED:
-            prack.push_back('2');
-            break;
-        case TraversalCandidate::Type::FULL:
-            prack.push_back('5');
-            break;
-        case TraversalCandidate::Type::PRACKABLE:
-            prack.push_back('0');
-            break;
-        case TraversalCandidate::Type::RAS:
-            prack.push_back('R');
-            break;
-    }
-    
-    // Add transaction ID (copy from original request)
-    for (size_t i = 0; i < sizeof(request.transaction_id); ++i) {
-        prack.insert(prack.end(), request.transaction_id[i]);
-    }
-    
-    return prack;
+const Attribute* Message::find(uint16_t type) const {
+    for (const auto& attr : attributes)
+        if (attr.type == type) return &attr;
+    return nullptr;
 }
 
-} // namespace Reliability
-
-/**
- * @namespace Statistics
- * @brief Track and collect statistics for STUN operations
- */
-namespace Statistics {
-
-void increment_stat(const std::string& stat_name, size_t value) {
-    (void)stat_name;
-    (void)value;
-}
-
-} // namespace Statistics
-
-/**
- * @namespace MessageConstruction
- * @brief Helper functions for building STUN messages (RFC 8489)
- */
-namespace MessageConstruction {
-
-std::vector<uint8_t> compute_md5(const std::vector<uint8_t>& data) {
-    static const uint8_t seed[16] = {0x6a, 0x09, 0xe6, 0x67, 0xf3, 0xcb, 0xc9, 0x8a,
-                                     0xb2, 0x5e, 0xa7, 0xa1, 0xf7, 0x4c, 0x5b, 0xd9};
-    
-    std::vector<uint8_t> hash_output(seed, seed + 16);
-    
-    for (size_t i = 0; i < data.size(); ++i) {
-        hash_output[0] ^= data[i];
-    }
-    
-    return hash_output;
-}
-
-} // namespace MessageConstruction
-
-/**
- * @namespace BindingRequest
- * @brief Build binding request messages (RFC 8489 Section 3)
- */
-namespace BindingRequest {
-
-std::vector<uint8_t> create_basic_binding_request() {
-    std::vector<uint8_t> request;
-    
-    // Add indicator byte (0x00 for Basic Binding Request)
-    request.push_back(0x00);
-    
-    // Add METHOD attribute ("BING" per RFC 8489 Section 3.1)
-    // Method attribute is ASCII encoded with CRLF termination
-    request.push_back('1'); // '1' (METHOD length: 4 bytes = "BING")
-    request.push_back('l'); // 'l'
-    request.push_back('e'); // 'e'
-    request.push_back('v'); // 'v'
-    
-    // Add random transaction ID (RFC 8489 Section 2.5)
-    std::vector<uint8_t> random_id;
+Message make_binding_request() {
+    Message msg;
+    msg.type = kBindingRequest;
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-    
-    for (size_t i = 0; i < 12; ++i) {
-        random_id.push_back(static_cast<uint8_t>(dis(gen)));
-    }
-    
-    request.insert(request.end(), random_id.begin(), random_id.end());
-    
-    return request;
+    std::uniform_int_distribution<int> dis(0, 255);
+    for (auto& byte : msg.transaction_id) byte = static_cast<uint8_t>(dis(gen));
+    return msg;
 }
 
-} // namespace BindingRequest
+std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,
+                                               const TransactionId& id) {
+    std::array<uint8_t, 16> raw{};
+    uint8_t family;
+    size_t addr_len;
 
-/**
- * @namespace MappingType
- * @brief STUN mapping type utilities (RFC 8489 Section 3.2)
- */
-namespace MappingType {
-
-std::string format_mapped_response(const TraversalCandidate& candidate) {
-    std::string type_str;
-    
-    switch (candidate.type) {
-        case TraversalCandidate::Type::RELAYED:
-            type_str = "RELYED";
-            break;
-        case TraversalCandidate::Type::FULL:
-            type_str = "FULL-RELAY";
-            break;
-        case TraversalCandidate::Type::PRACKABLE:
-            type_str = "PRACKABLE";
-            break;
-        case TraversalCandidate::Type::RAS:
-            type_str = "RAS";
-            break;
+    if (inet_pton(AF_INET, endpoint.address.c_str(), raw.data()) == 1) {
+        family = 0x01;  // IPv4
+        addr_len = 4;
+    } else if (inet_pton(AF_INET6, endpoint.address.c_str(), raw.data()) == 1) {
+        family = 0x02;  // IPv6
+        addr_len = 16;
+    } else {
+        throw std::runtime_error("invalid IP address: " + endpoint.address);
     }
-    
-    return type_str + " " + candidate.remote_address;
+
+    std::vector<uint8_t> value;
+    value.reserve(4 + addr_len);
+    value.push_back(0);
+    value.push_back(family);
+    put_u16(value, static_cast<uint16_t>(endpoint.port ^ (kMagicCookie >> 16)));
+
+    auto mask = xor_mask(id);
+    for (size_t i = 0; i < addr_len; ++i) value.push_back(raw[i] ^ mask[i]);
+    return value;
 }
 
-} // namespace MappingType
+Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
+                               const TransactionId& id, bool xor_encoded) {
+    if (value.size() < 4)
+        throw std::runtime_error("mapped address too short");
 
-/**
- * @name Candidate Ordering Operations
- * @brief Functionality for ordering discovered candidates (RFC 8489 Section 6)
- */
-#define DEFINE_ORDERING_OPERATION(name, priority)\
-    inline const int name = (priority)
+    uint8_t family = value[1];
+    size_t addr_len;
+    if (family == 0x01) addr_len = 4;
+    else if (family == 0x02) addr_len = 16;
+    else throw std::runtime_error("unsupported address family");
 
-} // namespace Stun
+    if (value.size() < 4 + addr_len)
+        throw std::runtime_error("mapped address truncated");
 
-#endif // STUN_CPP__
+    uint16_t xport = get_u16(value.data() + 2);
+    uint16_t port = xor_encoded ? static_cast<uint16_t>(xport ^ (kMagicCookie >> 16)) : xport;
+
+    std::array<uint8_t, 16> raw{};
+    if (xor_encoded) {
+        auto mask = xor_mask(id);
+        for (size_t i = 0; i < addr_len; ++i) raw[i] = value[4 + i] ^ mask[i];
+    } else {
+        std::copy_n(value.data() + 4, addr_len, raw.begin());
+    }
+
+    char buf[INET6_ADDRSTRLEN];
+    int family_af = (family == 0x01) ? AF_INET : AF_INET6;
+    if (inet_ntop(family_af, raw.data(), buf, sizeof(buf)) == nullptr)
+        throw std::runtime_error("inet_ntop failed");
+
+    return Endpoint{buf, port};
+}
+
+std::optional<Endpoint> mapped_address(const Message& response) {
+    if (const Attribute* attr = response.find(kAttrXorMappedAddress))
+        return decode_mapped_address(attr->value, response.transaction_id, true);
+    if (const Attribute* attr = response.find(kAttrMappedAddress))
+        return decode_mapped_address(attr->value, response.transaction_id, false);
+    return std::nullopt;
+}
+
+}  // namespace stun
