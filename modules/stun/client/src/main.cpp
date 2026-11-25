@@ -1,5 +1,7 @@
 #include "stun_client.h"
 
+#include "log.h"
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -39,6 +41,8 @@ Server parse_server(const std::string& arg, const std::string& default_port) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    logging::init();
+
     Server server = parse_server((argc > 1) ? argv[1] : "stun.l.google.com:19302", "19302");
 
     stun::Message request = stun::client::make_binding_request();
@@ -51,7 +55,7 @@ int main(int argc, char** argv) {
     addrinfo* res = nullptr;
     int rc = getaddrinfo(server.host.c_str(), server.port.c_str(), &hints, &res);
     if (rc != 0) {
-        std::cerr << "resolve failed: " << gai_strerror(rc) << "\n";
+        STUN_LOG_ERROR("client", "resolve failed: %s", gai_strerror(rc));
         return 1;
     }
 
@@ -62,13 +66,13 @@ int main(int argc, char** argv) {
         if (fd >= 0) break;
     }
     if (fd < 0) {
-        std::cerr << "socket failed\n";
+        STUN_LOG_ERROR("client", "socket failed");
         freeaddrinfo(res);
         return 1;
     }
 
     if (sendto(fd, packet.data(), packet.size(), 0, ai->ai_addr, ai->ai_addrlen) < 0) {
-        std::cerr << "send failed\n";
+        STUN_LOG_ERROR("client", "send failed");
         freeaddrinfo(res);
         close(fd);
         return 1;
@@ -86,8 +90,8 @@ int main(int argc, char** argv) {
     close(fd);
 
     if (n < 0) {
-        std::cerr << "no response from " << server.host << ":" << server.port
-                  << " (timeout or network error)\n";
+        STUN_LOG_ERROR("client", "no response from %s:%s (timeout or network error)",
+                       server.host.c_str(), server.port.c_str());
         return 1;
     }
     buffer.resize(static_cast<size_t>(n));
@@ -96,25 +100,27 @@ int main(int argc, char** argv) {
     try {
         response = stun::Message::decode(buffer);
     } catch (const std::exception& e) {
-        std::cerr << "decode failed: " << e.what() << "\n";
+        STUN_LOG_ERROR("client", "decode failed: %s", e.what());
         return 1;
     }
 
     if (response.transaction_id != request.transaction_id) {
-        std::cerr << "transaction id mismatch\n";
+        STUN_LOG_ERROR("client", "transaction id mismatch");
         return 1;
     }
 
     if (response.type == stun::kBindingResponse) {
         auto endpoint = stun::client::mapped_address(response);
         if (!endpoint) {
-            std::cerr << "binding response has no mapped address\n";
+            STUN_LOG_ERROR("client", "binding response has no mapped address");
             return 1;
         }
+        // Machine-readable result on stdout; diagnostics go through the logger.
         std::cout << endpoint->address << ":" << endpoint->port << "\n";
         return 0;
     }
 
-    std::cerr << "unexpected message type 0x" << std::hex << response.type << std::dec << "\n";
+    STUN_LOG_ERROR("client", "unexpected message type 0x%04x",
+                   static_cast<unsigned>(response.type));
     return 1;
 }

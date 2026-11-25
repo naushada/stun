@@ -14,31 +14,62 @@ the client's reflexive address in a `XOR-MAPPED-ADDRESS` attribute.
 - `XOR-MAPPED-ADDRESS` and `MAPPED-ADDRESS` encoding/decoding for IPv4 and IPv6.
 - Client (Binding request) and server (Binding response) with no external
   dependencies.
+- Built-in leveled logging library with syslog semantics (see [Logging](#logging)).
 
 ## Layout
 
 ```
 stun
+├── logging/              # leveled logging library (static lib stun_log)
+│   ├── inc/log.h
+│   ├── src/log.cpp
+│   ├── test/log_test.cpp
+│   └── CMakeLists.txt
 ├── modules/stun/
-│   ├── core/          # shared message format (encode/decode, XOR-MAPPED-ADDRESS)
+│   ├── core/             # shared message format (encode/decode, XOR-MAPPED-ADDRESS)
 │   │   ├── inc/stun.h
 │   │   ├── src/stun.cpp
-│   │   └── test/core_test.cpp
-│   ├── client/        # Binding request + CLI
+│   │   ├── test/core_test.cpp
+│   │   └── CMakeLists.txt
+│   ├── client/           # Binding request + CLI
 │   │   ├── inc/stun_client.h
 │   │   ├── src/stun_client.cpp
 │   │   ├── src/main.cpp
-│   │   └── test/client_test.cpp
-│   └── server/        # Binding response + CLI
+│   │   ├── test/client_test.cpp
+│   │   └── CMakeLists.txt
+│   └── server/           # Binding response + CLI
 │       ├── inc/stun_server.h
 │       ├── src/stun_server.cpp
 │       ├── src/main.cpp
-│       └── test/server_test.cpp
+│       ├── test/server_test.cpp
+│       └── CMakeLists.txt
 ├── scripts/
-│   ├── build.sh       # podman build
-│   └── run.sh         # podman run (client or server)
+│   ├── build.sh          # podman build
+│   └── run.sh            # podman run (client or server)
 ├── Dockerfile
 └── CMakeLists.txt
+```
+
+## Logging
+
+`logging/` builds a static library (`stun_log`) used by the client and server.
+
+- **Levels** mirror syslog severities: `Emergency`, `Alert`, `Critical`, `Error`,
+  `Warning`, `Notice`, `Info`, `Debug`. The default threshold is `Notice`.
+- **Per-module thresholds**: `logging::set_level("client", logging::Level::Debug)`.
+- **Two backends**:
+  - `Stderr` — single-line JSON (default), ideal for containers.
+  - `Syslog` — traditional `syslog(3)` with a configurable facility.
+- **Cloud / Elasticsearch**: the JSON backend emits one line per event, e.g.
+  `{"timestamp":"...","level":"notice","module":"client","message":"..."}`.
+  Tail it with Fluentd/Filebeat/Vector (or a container log driver) and ship it
+  straight to Elasticsearch or a cloud log store — no ES client is baked into
+  the library.
+
+```cpp
+logging::init();                          // defaults: Stderr backend + Notice level
+logging::set_level("server", logging::Level::Debug);
+STUN_LOG_NOTICE("client", "querying %s", host);
 ```
 
 ## Building (Podman only)
@@ -50,7 +81,7 @@ stun
 Or manually:
 
 ```bash
-podman build -t stun:latest .
+podman build -f Dockerfile -t stun:latest .
 ```
 
 ## Running
@@ -77,7 +108,7 @@ ctest --test-dir build
 ```
 
 Targets: `stun-client`, `stun-server`, and the `stun-core-test`,
-`stun-client-test`, `stun-server-test` test binaries.
+`stun-client-test`, `stun-server-test`, `stun-log-test` test binaries.
 
 ## License
 

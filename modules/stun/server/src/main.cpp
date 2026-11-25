@@ -1,5 +1,7 @@
 #include "stun_server.h"
 
+#include "log.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -7,7 +9,6 @@
 
 #include <cstdlib>
 #include <exception>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -35,12 +36,14 @@ stun::Endpoint endpoint_from_sockaddr(const sockaddr* addr) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    logging::init();
+
     uint16_t listen_port =
         (argc > 1) ? static_cast<uint16_t>(std::strtoul(argv[1], nullptr, 10)) : 3478;
 
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
-        std::cerr << "socket failed\n";
+        STUN_LOG_ERROR("server", "socket failed");
         return 1;
     }
 
@@ -49,12 +52,12 @@ int main(int argc, char** argv) {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(listen_port);
     if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        std::cerr << "bind failed\n";
+        STUN_LOG_ERROR("server", "bind failed on udp/%u", static_cast<unsigned>(listen_port));
         close(fd);
         return 1;
     }
 
-    std::cout << "STUN server listening on udp/" << listen_port << "\n";
+    STUN_LOG_NOTICE("server", "listening on udp/%u", static_cast<unsigned>(listen_port));
 
     std::vector<uint8_t> buffer(2048);
     while (true) {
@@ -63,7 +66,7 @@ int main(int argc, char** argv) {
         ssize_t n = recvfrom(fd, buffer.data(), buffer.size(), 0,
                              reinterpret_cast<sockaddr*>(&from), &from_len);
         if (n < 0) {
-            std::cerr << "recvfrom failed\n";
+            STUN_LOG_ERROR("server", "recvfrom failed");
             continue;
         }
 
@@ -72,7 +75,7 @@ int main(int argc, char** argv) {
             request = stun::Message::decode(
                 std::vector<uint8_t>(buffer.begin(), buffer.begin() + n));
         } catch (const std::exception& e) {
-            std::cerr << "decode failed: " << e.what() << "\n";
+            STUN_LOG_ERROR("server", "decode failed: %s", e.what());
             continue;
         }
 
@@ -86,7 +89,8 @@ int main(int argc, char** argv) {
         sendto(fd, packet.data(), packet.size(), 0,
                reinterpret_cast<sockaddr*>(&from), from_len);
 
-        std::cout << "responded to " << client.address << ":" << client.port << "\n";
+        STUN_LOG_INFO("server", "responded to %s:%u",
+                      client.address.c_str(), static_cast<unsigned>(client.port));
     }
 
     return 0;  // unreachable
