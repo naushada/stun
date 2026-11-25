@@ -1,10 +1,9 @@
 // log.h — minimal leveled logging library with syslog semantics.
 //
 // Severity levels mirror syslog (RFC 5424). Two backends are provided:
-//   * Stderr — single-line JSON. This is the container/cloud-friendly path:
-//     tail it with Fluentd/Filebeat/Vector (or a container log driver) and
-//     ship to Elasticsearch or any cloud log store. (Default.)
-//   * Syslog — traditional syslog(3) output for host deployments.
+//   * Stderr — single-line JSON (default). Container/cloud-friendly: tail it
+//     with a log collector to ship to Elasticsearch or any cloud log store.
+//   * Syslog — traditional syslog(3) output (e.g. captured by syslog-ng).
 //
 // Defaults: Stderr backend, Notice level. Per-module thresholds via set_level().
 
@@ -13,7 +12,6 @@
 #include <syslog.h>
 
 #include <cstdarg>
-#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -35,8 +33,7 @@ enum class Level : int {
 enum Backend : unsigned {
     Syslog = 1u << 0,
     Stderr = 1u << 1,
-    Http   = 1u << 2,
-    All    = Syslog | Stderr | Http,
+    All    = Syslog | Stderr,
 };
 
 // Configure backends, the default level, and the syslog facility.
@@ -49,13 +46,6 @@ void set_default_level(Level level);
 
 // Minimum level for a named module (e.g. "client", "server", "core").
 void set_level(std::string_view module, Level level);
-
-// Configure the HTTP backend: POST each log line as JSON to `host:port/path`.
-// Set `use_tls` to POST over HTTPS; `verify_peer` (default true) validates the
-// server certificate against the system CA store, pass false for self-signed
-// certificates. E.g. set_http_endpoint("localhost", 9200, "/stun/_doc").
-void set_http_endpoint(std::string host, uint16_t port, std::string path,
-                       bool use_tls = false, bool verify_peer = true);
 
 // Effective level for a module (its own level, or the default).
 Level get_level(std::string_view module);
@@ -71,6 +61,12 @@ void log(Level level, std::string_view module, const char* fmt, ...);
 
 // printf-style formatting helper (C++17 has no std::format).
 std::string format(const char* fmt, ...);
+
+// Parse a backend name: "stderr" (default), "syslog", "all".
+Backend parse_backend(std::string_view name);
+
+// Initialize from the STUN_LOG_BACKEND environment variable (default: stderr).
+void init_from_env();
 
 }  // namespace logging
 

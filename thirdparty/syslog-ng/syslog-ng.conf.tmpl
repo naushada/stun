@@ -1,0 +1,25 @@
+@version: 3.35
+
+# syslog-ng: forward local logs to a remote syslog server.
+# The REMOTE_HOST / REMOTE_PORT / REMOTE_TRANSPORT placeholders below are
+# substituted by thirdparty/collect.sh.
+
+source s_local {
+    system();
+    internal();
+};
+
+destination d_remote {
+    syslog(
+        "@REMOTE_HOST@"
+        port(@REMOTE_PORT@)
+        transport("@REMOTE_TRANSPORT@")
+        # For TLS, uncomment and set the CA used to verify the remote server:
+        # tls(ca-file("/etc/ssl/certs/ca-certificates.crt"))
+    );
+};
+
+log {
+    source(s_local);
+    destination(d_remote);
+};

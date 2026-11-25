@@ -41,7 +41,7 @@ Server parse_server(const std::string& arg, const std::string& default_port) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    logging::init();
+    logging::init_from_env();
 
     Server server = parse_server((argc > 1) ? argv[1] : "stun.l.google.com:19302", "19302");
 

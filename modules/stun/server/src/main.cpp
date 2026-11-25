@@ -36,7 +36,7 @@ stun::Endpoint endpoint_from_sockaddr(const sockaddr* addr) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    logging::init();
+    logging::init_from_env();
 
     uint16_t listen_port =
         (argc > 1) ? static_cast<uint16_t>(std::strtoul(argv[1], nullptr, 10)) : 3478;
