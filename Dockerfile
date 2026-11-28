@@ -2,7 +2,7 @@ FROM ubuntu:22.04
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        build-essential cmake syslog-ng chrony ca-certificates && \
+        build-essential cmake pkg-config libevent-dev syslog-ng chrony ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -19,8 +19,37 @@ constexpr uint16_t kBindingError    = 0x0111;
 // The magic cookie (RFC 8489 Section 6), also used to XOR-encode addresses.
 constexpr uint32_t kMagicCookie = 0x2112A442;
 
+// Message class (RFC 8489 Section 6): the two class bits of the message type.
+enum class MessageClass : uint8_t {
+    Request         = 0x00,
+    Indication      = 0x01,
+    SuccessResponse = 0x02,
+    ErrorResponse   = 0x03,
+};
+
+// Build a 16-bit STUN message type from a 12-bit method and 2-bit class
+// (RFC 8489 Section 6). The method's bits are interleaved with the class bits.
+constexpr uint16_t make_type(uint16_t method, MessageClass cls) {
+    return static_cast<uint16_t>(
+        ((method & 0x0F80u) << 2) | ((method & 0x0070u) << 1) | (method & 0x000Fu) |
+        ((static_cast<uint8_t>(cls) & 0x02u) << 7) | ((static_cast<uint8_t>(cls) & 0x01u) << 4));
+}
+
+// Extract the 12-bit method from a message type.
+constexpr uint16_t method_of(uint16_t type) {
+    return static_cast<uint16_t>(
+        ((type & 0x3E00u) >> 2) | ((type & 0x00E0u) >> 1) | (type & 0x000Fu));
+}
+
+// Extract the 2-bit class from a message type.
+constexpr MessageClass class_of(uint16_t type) {
+    return static_cast<MessageClass>(
+        ((type & 0x0100u) >> 7) | ((type & 0x0010u) >> 4));
+}
+
 // Attribute types (RFC 8489 Sections 14 and 18).
 constexpr uint16_t kAttrMappedAddress    = 0x0001;
+constexpr uint16_t kAttrErrorCode        = 0x0009;
 constexpr uint16_t kAttrXorMappedAddress = 0x0020;
 
 // Address families (RFC 8489 Section 14.1).
@@ -59,6 +88,13 @@ struct Endpoint {
     uint8_t family = kFamilyIPv4;  // kFamilyIPv4 or kFamilyIPv6 (set by decode)
 };
 
+// An ERROR-CODE attribute payload (RFC 8489 Section 14.8). `code` is the
+// three-digit error code (class*100 + number), e.g. 400, 437.
+struct ErrorCode {
+    uint16_t code = 0;
+    std::string reason;
+};
+
 // Human-readable family name ("IPv4"/"IPv6").
 inline const char* family_name(uint8_t family) {
     return family == kFamilyIPv6 ? "IPv6" : "IPv4";
@@ -73,5 +109,15 @@ std::vector<uint8_t> encode_xor_mapped_address(const Endpoint& endpoint,
 Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
                                const TransactionId& id,
                                bool xor_encoded);
+
+// Encode an ERROR-CODE attribute value (2 reserved bytes, class, number, reason).
+std::vector<uint8_t> encode_error_code(const ErrorCode& error);
+
+// Decode an ERROR-CODE attribute value. Throws std::runtime_error on malformed
+// input (too short, or class/number out of range).
+ErrorCode decode_error_code(const std::vector<uint8_t>& value);
+
+// A fresh random 96-bit transaction id.
+TransactionId random_transaction_id();
 
 }  // namespace stun

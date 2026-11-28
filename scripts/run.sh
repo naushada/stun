@@ -11,8 +11,11 @@ case "$mode" in
   server)
     exec podman run --rm -p 3478:3478/udp stun:latest ./build/stun-server "${@:2}"
     ;;
+  turn)
+    exec podman run --rm -p 3478:3478/udp stun:latest ./build/turn-server "${@:2}"
+    ;;
   *)
-    echo "usage: $0 [client|server] [args...]" >&2
+    echo "usage: $0 [client|server|turn] [args...]" >&2
     exit 1
     ;;
 esac

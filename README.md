@@ -122,6 +122,26 @@ podman build -f Dockerfile -t stun:latest .
 
 The client prints the mapped address as `host:port`.
 
+## TURN relay
+
+A minimal [TURN](https://datatracker.ietf.org/doc/html/rfc8656) (Traversal
+Using Relays around NAT) server is provided under `modules/turn/`. It builds on
+the shared STUN message format and, per allocation, relays UDP application data
+between a client and permitted peers.
+
+Supported: `Allocate`, `Refresh`, `CreatePermission`, `ChannelBind`, `Send`
+indications, `Data` indications, and `ChannelData`. See
+[modules/turn/SPEC.md](modules/turn/SPEC.md) for the design and the current
+deferrals (v1 is UDP-only, unauthenticated, IPv4-only).
+
+```bash
+# Run the TURN relay on udp/3478, advertising 127.0.0.1 as the relay address:
+./scripts/run.sh turn
+
+# Custom port and relay address:
+./scripts/run.sh turn 3478 192.0.2.10
+```
+
 ## Building and testing natively (CMake)
 
 ```bash
@@ -130,8 +150,9 @@ cmake --build build -j
 ctest --test-dir build
 ```
 
-Targets: `stun-client`, `stun-server`, and the `stun-core-test`,
-`stun-client-test`, `stun-server-test`, `stun-log-test` test binaries.
+Targets: `stun-client`, `stun-server`, `turn-server`, and the `stun-core-test`,
+`stun-client-test`, `stun-server-test`, `stun-log-test`, `turn-core-test`,
+`turn-server-test` test binaries.
 
 ## License
 

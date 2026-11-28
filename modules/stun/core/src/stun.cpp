@@ -1,41 +1,27 @@
 #include "stun.h"
 
+#include "byte_order.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <random>
 #include <stdexcept>
 #include <utility>
 
 namespace stun {
+
+using framework::get_u16;
+using framework::get_u32;
+using framework::put_u16;
+using framework::put_u32;
+
 namespace {
 
 constexpr size_t kHeaderSize = 20;
-
-void put_u16(std::vector<uint8_t>& out, uint16_t v) {
-    out.push_back(static_cast<uint8_t>(v >> 8));
-    out.push_back(static_cast<uint8_t>(v & 0xff));
-}
-
-void put_u32(std::vector<uint8_t>& out, uint32_t v) {
-    out.push_back(static_cast<uint8_t>(v >> 24));
-    out.push_back(static_cast<uint8_t>((v >> 16) & 0xff));
-    out.push_back(static_cast<uint8_t>((v >> 8) & 0xff));
-    out.push_back(static_cast<uint8_t>(v & 0xff));
-}
-
-uint16_t get_u16(const uint8_t* p) {
-    return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
-}
-
-uint32_t get_u32(const uint8_t* p) {
-    return (static_cast<uint32_t>(p[0]) << 24) |
-           (static_cast<uint32_t>(p[1]) << 16) |
-           (static_cast<uint32_t>(p[2]) << 8) |
-           static_cast<uint32_t>(p[3]);
-}
 
 // The 16-byte XOR mask used by XOR-MAPPED-ADDRESS: the magic cookie followed
 // by the 96-bit transaction id.
@@ -175,6 +161,37 @@ Endpoint decode_mapped_address(const std::vector<uint8_t>& value,
         throw std::runtime_error("inet_ntop failed");
 
     return Endpoint{buf, port, family};
+}
+
+std::vector<uint8_t> encode_error_code(const ErrorCode& error) {
+    std::vector<uint8_t> value;
+    value.reserve(4 + error.reason.size());
+    value.push_back(0);
+    value.push_back(0);
+    value.push_back(static_cast<uint8_t>(error.code / 100));
+    value.push_back(static_cast<uint8_t>(error.code % 100));
+    value.insert(value.end(), error.reason.begin(), error.reason.end());
+    return value;
+}
+
+ErrorCode decode_error_code(const std::vector<uint8_t>& value) {
+    if (value.size() < 4)
+        throw std::runtime_error("error code too short");
+    uint8_t cls = value[2];
+    uint8_t number = value[3];
+    if (cls < 3 || cls > 6 || number > 99)
+        throw std::runtime_error("invalid error code class/number");
+    return ErrorCode{static_cast<uint16_t>(cls * 100 + number),
+                     std::string(value.begin() + 4, value.end())};
+}
+
+TransactionId random_transaction_id() {
+    TransactionId id{};
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dis(0, 255);
+    for (auto& b : id) b = static_cast<uint8_t>(dis(gen));
+    return id;
 }
 
 }  // namespace stun

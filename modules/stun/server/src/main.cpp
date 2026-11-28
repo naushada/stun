@@ -1,5 +1,8 @@
 #include "stun_server.h"
 
+#include "event_loop.h"
+#include "net.h"
+
 #include "log.h"
 
 #include <arpa/inet.h>
@@ -11,29 +14,6 @@
 #include <exception>
 #include <string>
 #include <vector>
-
-namespace {
-
-// Convert a socket address into a host address plus port.
-stun::Endpoint endpoint_from_sockaddr(const sockaddr* addr) {
-    if (addr->sa_family == AF_INET) {
-        const auto* in = reinterpret_cast<const sockaddr_in*>(addr);
-        char host[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &in->sin_addr, host, sizeof(host)) == nullptr)
-            return {};
-        return stun::Endpoint{host, ntohs(in->sin_port), stun::kFamilyIPv4};
-    }
-    if (addr->sa_family == AF_INET6) {
-        const auto* in6 = reinterpret_cast<const sockaddr_in6*>(addr);
-        char host[INET6_ADDRSTRLEN];
-        if (inet_ntop(AF_INET6, &in6->sin6_addr, host, sizeof(host)) == nullptr)
-            return {};
-        return stun::Endpoint{host, ntohs(in6->sin6_port), stun::kFamilyIPv6};
-    }
-    return {};
-}
-
-}  // namespace
 
 int main(int argc, char** argv) {
     logging::init_from_env();
@@ -59,15 +39,16 @@ int main(int argc, char** argv) {
 
     STUN_LOG_NOTICE("server", "listening on udp/%u", static_cast<unsigned>(listen_port));
 
-    std::vector<uint8_t> buffer(2048);
-    while (true) {
+    framework::EventLoop loop;
+    loop.add_read(fd, [fd](int) {
+        std::vector<uint8_t> buffer(2048);
         sockaddr_storage from{};
         socklen_t from_len = sizeof(from);
         ssize_t n = recvfrom(fd, buffer.data(), buffer.size(), 0,
                              reinterpret_cast<sockaddr*>(&from), &from_len);
         if (n < 0) {
             STUN_LOG_ERROR("server", "recvfrom failed");
-            continue;
+            return;
         }
 
         stun::Message request;
@@ -76,13 +57,12 @@ int main(int argc, char** argv) {
                 std::vector<uint8_t>(buffer.begin(), buffer.begin() + n));
         } catch (const std::exception& e) {
             STUN_LOG_ERROR("server", "decode failed: %s", e.what());
-            continue;
+            return;
         }
 
-        if (request.type != stun::kBindingRequest)
-            continue;
+        if (request.type != stun::kBindingRequest) return;
 
-        stun::Endpoint client = endpoint_from_sockaddr(reinterpret_cast<sockaddr*>(&from));
+        stun::Endpoint client = stun::endpoint_from_sockaddr(reinterpret_cast<sockaddr*>(&from));
         stun::Message response = stun::server::make_binding_response(request, client);
         std::vector<uint8_t> packet = response.encode();
 
@@ -91,7 +71,8 @@ int main(int argc, char** argv) {
 
         STUN_LOG_INFO("server", "responded to %s:%u",
                       client.address.c_str(), static_cast<unsigned>(client.port));
-    }
+    });
 
-    return 0;  // unreachable
+    loop.run();
+    return 0;
 }

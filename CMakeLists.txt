@@ -11,7 +11,10 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 enable_testing()
 
+add_subdirectory(modules/framework)
 add_subdirectory(logging)
 add_subdirectory(modules/stun/core)
 add_subdirectory(modules/stun/client)
 add_subdirectory(modules/stun/server)
+add_subdirectory(modules/turn/core)
+add_subdirectory(modules/turn/server)

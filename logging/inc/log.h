@@ -79,3 +79,13 @@ void init_from_env();
 #define STUN_LOG_NOTICE(module, ...)    ::logging::log(::logging::Level::Notice, module, __VA_ARGS__)
 #define STUN_LOG_INFO(module, ...)      ::logging::log(::logging::Level::Info, module, __VA_ARGS__)
 #define STUN_LOG_DEBUG(module, ...)     ::logging::log(::logging::Level::Debug, module, __VA_ARGS__)
+
+// TURN_LOG_* — the same engine under a TURN-family name, for TURN/framework code.
+#define TURN_LOG_EMERGENCY(module, ...) ::logging::log(::logging::Level::Emergency, module, __VA_ARGS__)
+#define TURN_LOG_ALERT(module, ...)     ::logging::log(::logging::Level::Alert, module, __VA_ARGS__)
+#define TURN_LOG_CRITICAL(module, ...)  ::logging::log(::logging::Level::Critical, module, __VA_ARGS__)
+#define TURN_LOG_ERROR(module, ...)     ::logging::log(::logging::Level::Error, module, __VA_ARGS__)
+#define TURN_LOG_WARNING(module, ...)   ::logging::log(::logging::Level::Warning, module, __VA_ARGS__)
+#define TURN_LOG_NOTICE(module, ...)    ::logging::log(::logging::Level::Notice, module, __VA_ARGS__)
+#define TURN_LOG_INFO(module, ...)      ::logging::log(::logging::Level::Info, module, __VA_ARGS__)
+#define TURN_LOG_DEBUG(module, ...)     ::logging::log(::logging::Level::Debug, module, __VA_ARGS__)
